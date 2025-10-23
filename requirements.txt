@@ -1,0 +1,8 @@
+scrapegraphai
+ollama
+playwright
+psycopg2-binary
+python-dotenv
+pytest
+pytest-cov
+pytest-asyncio
