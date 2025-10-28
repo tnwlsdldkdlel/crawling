@@ -101,59 +101,75 @@ def extract_structured_data(content: str) -> Dict[str, Any]:
         "project": None
     }
 
-    # 실 정보 찾기
-    yarn_keywords = ["실", "yarn", "사용실"]
-    yarn_brands = ["라라뜨개", "솜솜뜨개", "니트러브", "앵콜스 뜨개실", "바늘이야기"]
+    # 실 정보 찾기 (띄어쓰기 변형 포함)
+    yarn_brands = [
+        r"라라\s*뜨개",      # 라라뜨개, 라라 뜨개
+        r"솜솜\s*뜨개",      # 솜솜뜨개, 솜솜 뜨개
+        r"니트\s*러브",      # 니트러브, 니트 러브
+        r"앵콜스\s*뜨개실",  # 앵콜스 뜨개실, 앵콜스뜨개실
+        r"바늘\s*이야기"     # 바늘이야기, 바늘 이야기
+    ]
 
-    # 먼저 브랜드명이 포함된 문장 찾기
-    for brand in yarn_brands:
-        brand_pattern = rf"([^.\n]*{brand}[^.\n]*)"
-        yarn_match = re.search(brand_pattern, content, re.IGNORECASE)
-        if yarn_match:
-            yarn_text = yarn_match.group(1).strip()[:200]
+    # 1순위: "실 :" 또는 "yarn :" 키워드가 명시적으로 있는 줄 찾기
+    explicit_yarn_pattern = r"(?:실|yarn)\s*[:：]\s*(.+?)(?:\n|$)"
+    explicit_match = re.search(explicit_yarn_pattern, content, re.IGNORECASE)
+    if explicit_match:
+        yarn_text = explicit_match.group(1).strip()
+        # mm 정보 제거 (바늘 정보이므로)
+        yarn_text = re.sub(r'\s*\d+\.?\d*\s*mm.*', '', yarn_text).strip()
+        if len(yarn_text) > 1:
+            extracted["yarn"] = yarn_text
 
-            # 불필요한 제목/태그 제거
-            yarn_text = re.sub(r'\[.*?\]', '', yarn_text)
-            yarn_text = re.sub(r'뜨개일기', '', yarn_text)
-            yarn_text = re.sub(r'수민님?\s*', '', yarn_text)
-            yarn_text = re.sub(r'마들렌\s*자?켓', '', yarn_text)
-            yarn_text = re.sub(r'cardigan|자켓|조끼|가디건|베스트|스웨터', '', yarn_text, flags=re.IGNORECASE)
-
-            # 괄호 내용만 추출 시도
-            paren_match = re.search(r'\(([^)]+)\)', yarn_text)
-            if paren_match:
-                yarn_text = paren_match.group(1).strip()
-
-            # mm 정보 제거
-            yarn_text = re.sub(r'\s*\d+\.?\d*\s*mm.*', '', yarn_text).strip()
-            yarn_text = yarn_text.strip('/ ').strip()
-
-            if yarn_text:
-                extracted["yarn"] = yarn_text
-                break
-
-    # 브랜드를 못 찾으면 "yarn :" 형식만 검색 (일반 "실" 키워드는 사용하지 않음)
+    # 2순위: 명시적 표현이 없으면 브랜드명이 포함된 문장 찾기
     if not extracted["yarn"]:
-        # "yarn :" 형식만 검색
-        yarn_match = re.search(r"yarn\s*[:：]\s*(.+?)(?:\n|$)", content, re.IGNORECASE)
-        if yarn_match:
-            yarn_text = yarn_match.group(1).strip()
-            # mm 정보 제거
-            yarn_text = re.sub(r'\s*\d+\.?\d*\s*mm.*', '', yarn_text).strip()
-            if len(yarn_text) > 1:
-                extracted["yarn"] = yarn_text
+        for brand in yarn_brands:
+            brand_pattern = rf"([^.\n]*{brand}[^.\n]*)"
+            yarn_match = re.search(brand_pattern, content, re.IGNORECASE)
+            if yarn_match:
+                yarn_text = yarn_match.group(1).strip()[:200]
+
+                # "도안", "패턴" 키워드가 있는 줄은 제외
+                if re.search(r'도안|패턴|pattern', yarn_text, re.IGNORECASE):
+                    continue
+
+                # 불필요한 제목/태그 제거
+                yarn_text = re.sub(r'\[.*?\]', '', yarn_text)
+                yarn_text = re.sub(r'뜨개일기', '', yarn_text)
+                yarn_text = re.sub(r'수민님?\s*', '', yarn_text)
+                yarn_text = re.sub(r'마들렌\s*자?켓', '', yarn_text)
+                yarn_text = re.sub(r'cardigan|자켓|조끼|가디건|베스트|스웨터', '', yarn_text, flags=re.IGNORECASE)
+
+                # mm 정보 제거 (바늘 정보이므로)
+                yarn_text = re.sub(r'\s*\d+\.?\d*\s*mm.*', '', yarn_text).strip()
+
+                # 앞뒤 공백 및 특수문자 정리
+                yarn_text = yarn_text.strip('/ ').strip()
+
+                if yarn_text:
+                    extracted["yarn"] = yarn_text
+                    break
 
     # 바늘 정보 찾기
-    needle_patterns = [
-        r"needle\s*[:：]\s*(.+?)(?:\n|$)",  # needle : 밤부 4mm
-        r"바늘\s*[:：]\s*(.+?)(?:\n|사용|$)",  # 바늘: 4mm
-        r"([가-힣\s]*[\d.]+\s*mm)",  # 밤부 4mm, 치아오구 5mm 등
+    # 1순위: "needle :" 또는 "바늘 :" 명시적 표현
+    explicit_needle_patterns = [
+        r"needle\s*[:：]\s*(.+?)(?:\n|$)",
+        r"바늘\s*[:：]\s*(.+?)(?:\n|사용|$)",
     ]
-    for pattern in needle_patterns:
+    for pattern in explicit_needle_patterns:
         needle = re.search(pattern, content, re.IGNORECASE)
         if needle:
             extracted["needle"] = needle.group(1).strip()[:100]
             break
+
+    # 2순위: mm 패턴 (단추 제외)
+    if not extracted["needle"]:
+        mm_pattern = r"([가-힣\s]*[\d.]+\s*mm)"
+        matches = re.findall(mm_pattern, content, re.IGNORECASE)
+        for match in matches:
+            # "단추", "버튼" 키워드가 없는 것만 선택
+            if not re.search(r'단추|버튼|button', match, re.IGNORECASE):
+                extracted["needle"] = match.strip()[:100]
+                break
 
     # 프로젝트/작품명 찾기
     project_patterns = [
