@@ -176,7 +176,7 @@ async def search_naver_blogs(keyword: str, max_results: int = 10, max_pages: int
     Args:
         keyword: 검색 키워드
         max_results: 가져올 최대 결과 수
-        max_pages: 검색할 최대 페이지 수
+        max_pages: 검색할 최대 페이지 수 (사용 안 함 - 한 페이지에 모든 결과 로드)
 
     Returns:
         블로그 URL 리스트
@@ -188,41 +188,33 @@ async def search_naver_blogs(keyword: str, max_results: int = 10, max_pages: int
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
 
-            # 여러 페이지 순회
-            for page_num in range(1, max_pages + 1):
-                # 네이버 블로그 검색 (start: 1, 11, 21, 31, ...)
-                start = (page_num - 1) * 10 + 1
-                search_url = f"https://search.naver.com/search.naver?where=blog&query={keyword}&start={start}"
+            # 네이버 블로그 검색 (전체 탭)
+            search_url = f"https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query={keyword}"
 
-                print_colored(f"  페이지 {page_num} 검색 중... (start={start})", "blue")
-                await page.goto(search_url, wait_until="networkidle", timeout=30000)
+            print_colored(f"  검색 중... (키워드: {keyword})", "blue")
+            await page.goto(search_url, wait_until="networkidle", timeout=30000)
 
-                # 블로그 링크 추출
-                # 모든 링크를 가져와서 blog.naver.com 링크만 필터링
-                all_links = await page.query_selector_all("a")
+            # 페이지 스크롤하여 추가 콘텐츠 로드
+            for i in range(3):
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await asyncio.sleep(0.5)
 
-                page_blog_count = 0
-                for link in all_links:
-                    href = await link.get_attribute("href")
-                    if href and "blog.naver.com" in href:
-                        # 포스트 ID가 있는 링크만 (실제 블로그 포스트)
-                        # 예: https://blog.naver.com/username/223844145249
-                        if re.search(r'blog\.naver\.com/[^/]+/\d+', href):
-                            # 중복 제거
-                            if href not in blog_urls:
-                                blog_urls.append(href)
-                                page_blog_count += 1
-                            if len(blog_urls) >= max_results:
-                                break
+            # 블로그 링크 추출
+            all_links = await page.query_selector_all("a")
 
-                print_colored(f"    → {page_blog_count}개 발견", "blue")
+            for link in all_links:
+                href = await link.get_attribute("href")
+                if href and "blog.naver.com" in href:
+                    # 포스트 ID가 있는 링크만 (실제 블로그 포스트)
+                    # 예: https://blog.naver.com/username/223844145249
+                    if re.search(r'blog\.naver\.com/[^/]+/\d+', href):
+                        # 중복 제거
+                        if href not in blog_urls:
+                            blog_urls.append(href)
+                        if len(blog_urls) >= max_results:
+                            break
 
-                # 최대 결과 수에 도달하면 중단
-                if len(blog_urls) >= max_results:
-                    break
-
-                # 페이지 간 딜레이 (네이버 서버 부하 방지)
-                await asyncio.sleep(1)
+            print_colored(f"    → {len(blog_urls)}개 발견", "blue")
 
             await browser.close()
 
